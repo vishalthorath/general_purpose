@@ -2,7 +2,7 @@ trigger: none
 
 resources:
   pipelines:
-  - pipeline: buildPipeline
+  - pipeline: buildpipeline
     source: Task19-Build
     trigger: true
 
@@ -10,7 +10,6 @@ pool:
   name: batch13-pool
 
 stages:
-
 - stage: Deploy
   jobs:
   - job: Deploy
@@ -22,9 +21,7 @@ stages:
 
     - bash: |
         echo "Deploying artifact..."
-
         test -f "$(Pipeline.Workspace)/buildPipeline/app/index.html"
-
         echo "Artifact found"
         echo "Deployment successful"
       displayName: Deploy
