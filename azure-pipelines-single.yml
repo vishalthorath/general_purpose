@@ -1,3 +1,4 @@
+
 trigger:
 - main
 
@@ -10,28 +11,38 @@ stages:
   jobs:
   - job: Build
     steps:
-    - bash: |
-        echo "Building application..."
-        mkdir -p "$(Build.ArtifactStagingDirectory)/app"
-        cp index.html "$(Build.ArtifactStagingDirectory)/app/"
+    - task: PowerShell@2
       displayName: Build
+      inputs:
+        targetType: inline
+        script: |
+          Write-Host "Building application..."
+          New-Item -ItemType Directory -Force -Path "$(Build.ArtifactStagingDirectory)\app"
+          Copy-Item "index.html" "$(Build.ArtifactStagingDirectory)\app\"
 
 - stage: Test
   dependsOn: Build
   jobs:
   - job: Test
     steps:
-    - bash: |
-        chmod +x test.sh
-        ./test.sh
+    - task: PowerShell@2
       displayName: Test
+      inputs:
+        targetType: inline
+        script: |
+          Write-Host "Running tests..."
+          & ".\test.ps1"
 
 - stage: Deploy
   dependsOn: Test
   jobs:
   - job: Deploy
     steps:
-    - bash: |
-        echo "Deploying application..."
-        echo "Deployment successful"
+    - task: PowerShell@2
       displayName: Deploy
+      inputs:
+        targetType: inline
+        script: |
+          Write-Host "Deploying application..."
+          Write-Host "Deployment successful"
+
