@@ -2,7 +2,7 @@ trigger: none
 
 resources:
   pipelines:
-  - pipeline: buildpipeline
+  - pipeline: buildArtifact
     source: Task19-Build
     trigger: true
 
@@ -15,13 +15,13 @@ stages:
   - job: Deploy
     steps:
 
-    - download: buildPipeline
+    - download: buildArtifact
       artifact: app
       displayName: Download Artifact
 
     - bash: |
         echo "Deploying artifact..."
-        test -f "$(Pipeline.Workspace)/buildPipeline/app/index.html"
+        test -f "$(Pipeline.Workspace)/buildArtifact/app/index.html"
         echo "Artifact found"
         echo "Deployment successful"
       displayName: Deploy
