@@ -1,0 +1,37 @@
+trigger:
+- main
+
+pool:
+  name: batch13-pool
+
+stages:
+
+- stage: Build
+  jobs:
+  - job: Build
+    steps:
+    - bash: |
+        echo "Building application..."
+        mkdir -p "$(Build.ArtifactStagingDirectory)/app"
+        cp index.html "$(Build.ArtifactStagingDirectory)/app/"
+      displayName: Build
+
+- stage: Test
+  dependsOn: Build
+  jobs:
+  - job: Test
+    steps:
+    - bash: |
+        chmod +x test.sh
+        ./test.sh
+      displayName: Test
+
+- stage: Deploy
+  dependsOn: Test
+  jobs:
+  - job: Deploy
+    steps:
+    - bash: |
+        echo "Deploying application..."
+        echo "Deployment successful"
+      displayName: Deploy
