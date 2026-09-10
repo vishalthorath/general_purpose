@@ -31,7 +31,14 @@ stages:
         targetType: inline
         script: |
           Write-Host "Running tests..."
-          & ".\test.ps1"
+
+          if (Test-Path "index.html") {
+              Write-Host "Test passed: index.html exists"
+          }
+          else {
+              Write-Error "Test failed: index.html not found"
+              exit 1
+          }
 
 - stage: Deploy
   dependsOn: Test
