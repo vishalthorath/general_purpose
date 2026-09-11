@@ -1,0 +1,126 @@
+trigger: none
+
+pool:
+  name: batch13-pool
+
+variables:
+  serviceConnection: 'batch13-connection'
+  terraformDirectory: '$(System.DefaultWorkingDirectory)/terraform'
+
+stages:
+
+# =========================================================
+# BUILD
+# =========================================================
+- stage: Build
+  displayName: Build
+
+  jobs:
+  - job: BuildJob
+    displayName: Build Application
+
+    steps:
+
+    - powershell: |
+        Write-Host "Build stage completed"
+      displayName: Build
+
+    - powershell: |
+        New-Item -ItemType Directory -Force -Path "$(Build.ArtifactStagingDirectory)/app"
+        Set-Content "$(Build.ArtifactStagingDirectory)/app/app.txt" "Task 21 application artifact"
+      displayName: Create Artifact
+
+    - publish: $(Build.ArtifactStagingDirectory)/app
+      artifact: app
+      displayName: Publish Application Artifact
+
+
+# =========================================================
+# TERRAFORM
+# =========================================================
+- stage: Terraform
+  displayName: Terraform
+
+  dependsOn: Build
+
+  condition: succeeded()
+
+  jobs:
+  - job: TerraformJob
+    displayName: Terraform Init Plan Apply
+
+    steps:
+
+    - task: TerraformInstaller@1
+      displayName: Install Terraform
+      inputs:
+        terraformVersion: latest
+
+    - task: TerraformCLI@1
+      displayName: Terraform Init
+      inputs:
+        command: init
+        workingDirectory: '$(terraformDirectory)'
+        backendType: azurerm
+        backendServiceArm: '$(serviceConnection)'
+        backendAzureRmResourceGroupName: 'VT-RG'
+        backendAzureRmStorageAccountName: 'vtterraformstate'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'task21.tfstate' 
+
+    - task: TerraformCLI@1
+      displayName: Terraform Plan
+      inputs:
+        command: plan
+        workingDirectory: '$(terraformDirectory)'
+        environmentServiceName: '$(serviceConnection)'
+        publishPlanResults: 'task21-plan'
+
+    - task: TerraformCLI@1
+      displayName: Terraform Apply
+      inputs:
+        command: apply
+        workingDirectory: '$(terraformDirectory)'
+        environmentServiceName: '$(serviceConnection)'
+        commandOptions: '-auto-approve'
+
+     - task: TerraformCLI@1
+       name: TerraformOutput
+       displayName: Terraform Output
+       inputs:
+         command: output
+         workingDirectory: '$(terraformDirectory)'
+
+
+# =========================================================
+# HELM
+# =========================================================
+- stage: Helm
+  displayName: Helm Deploy
+
+  dependsOn: Terraform
+
+  condition: succeeded()
+
+  variables:
+    VM_PUBLIC_IP: $[ stageDependencies.Terraform.TerraformJob.outputs['TerraformOutput.vm_public_ip'] ]
+
+  jobs:
+  - job: HelmJob
+    displayName: Helm Deployment
+
+    steps:
+
+    - download: current
+      artifact: app
+      displayName: Download Application Artifact
+
+    - powershell: |
+        Write-Host "Terraform VM Public IP:"
+        Write-Host "$(VM_PUBLIC_IP)"
+      displayName: Read Terraform Output
+
+    - powershell: |
+        Write-Host "Helm deployment stage started"
+        Write-Host "Target VM: $(VM_PUBLIC_IP)"
+      displayName: Helm Deploy
