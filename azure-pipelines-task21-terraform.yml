@@ -22,17 +22,18 @@ stages:
     steps:
 
     - powershell: |
-        Write-Host "Build stage completed"
-      displayName: Build
+        Write-Host "========================================"
+        Write-Host "BUILD STAGE"
+        Write-Host "========================================"
 
-    - powershell: |
-        New-Item -ItemType Directory -Force -Path "$(Build.ArtifactStagingDirectory)/app"
-        Set-Content "$(Build.ArtifactStagingDirectory)/app/app.txt" "Task 21 application artifact"
-      displayName: Create Artifact
+        Write-Host "Checking Terraform..."
+        terraform version
 
-    - publish: $(Build.ArtifactStagingDirectory)/app
-      artifact: app
-      displayName: Publish Application Artifact
+        Write-Host "Checking Azure CLI..."
+        az version
+
+        Write-Host "Build completed successfully."
+      displayName: 'Build and Verify Tools'
 
 
 # =========================================================
@@ -40,9 +41,7 @@ stages:
 # =========================================================
 - stage: Terraform
   displayName: Terraform
-
   dependsOn: Build
-
   condition: succeeded()
 
   jobs:
@@ -51,59 +50,162 @@ stages:
 
     steps:
 
-    - task: TerraformInstaller@1
-      displayName: Install Terraform
+    # -----------------------------------------------------
+    # Azure Login
+    # -----------------------------------------------------
+    - task: AzureCLI@2
+      displayName: 'Azure Login'
       inputs:
-        terraformVersion: latest
+        azureSubscription: '$(serviceConnection)'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          Write-Host "========================================"
+          Write-Host "AZURE LOGIN"
+          Write-Host "========================================"
 
-    - task: TerraformCLI@1
-      displayName: Terraform Init
+          az account show
+
+    # -----------------------------------------------------
+    # Terraform Init
+    # -----------------------------------------------------
+    - powershell: |
+        Write-Host "========================================"
+        Write-Host "TERRAFORM INIT"
+        Write-Host "========================================"
+
+        Set-Location "$(terraformDirectory)"
+
+        terraform version
+        terraform init
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Terraform init failed."
+            exit 1
+        }
+      displayName: 'Terraform Init'
+
+    # -----------------------------------------------------
+    # Terraform Validate
+    # -----------------------------------------------------
+    - powershell: |
+        Write-Host "========================================"
+        Write-Host "TERRAFORM VALIDATE"
+        Write-Host "========================================"
+
+        Set-Location "$(terraformDirectory)"
+
+        terraform validate
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Terraform validate failed."
+            exit 1
+        }
+      displayName: 'Terraform Validate'
+
+    # -----------------------------------------------------
+    # Terraform Plan
+    # -----------------------------------------------------
+    - powershell: |
+        Write-Host "========================================"
+        Write-Host "TERRAFORM PLAN"
+        Write-Host "========================================"
+
+        Set-Location "$(terraformDirectory)"
+
+        terraform plan -out=tfplan
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Terraform plan failed."
+            exit 1
+        }
+      displayName: 'Terraform Plan'
+
+    # -----------------------------------------------------
+    # Publish Terraform Plan
+    # -----------------------------------------------------
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Terraform Plan'
       inputs:
-        command: init
-        workingDirectory: '$(terraformDirectory)'
-        backendType: azurerm
-        backendServiceArm: '$(serviceConnection)'
-        backendAzureRmResourceGroupName: 'VT-RG'
-        backendAzureRmStorageAccountName: 'vtterraformstate'
-        backendAzureRmContainerName: 'tfstate'
-        backendAzureRmKey: 'task21.tfstate' 
+        targetPath: '$(terraformDirectory)/tfplan'
+        artifact: 'terraform-plan'
 
-    - task: TerraformCLI@1
-      displayName: Terraform Plan
-      inputs:
-        command: plan
-        workingDirectory: '$(terraformDirectory)'
-        environmentServiceName: '$(serviceConnection)'
-        publishPlanResults: 'task21-plan'
+    # -----------------------------------------------------
+    # Terraform Apply
+    # -----------------------------------------------------
+    - powershell: |
+        Write-Host "========================================"
+        Write-Host "TERRAFORM APPLY"
+        Write-Host "========================================"
 
-    - task: TerraformCLI@1
-      displayName: Terraform Apply
-      inputs:
-        command: apply
-        workingDirectory: '$(terraformDirectory)'
-        environmentServiceName: '$(serviceConnection)'
-        commandOptions: '-auto-approve'
+        Set-Location "$(terraformDirectory)"
 
-    - task: TerraformCLI@1
+        terraform apply -auto-approve tfplan
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Terraform apply failed."
+            exit 1
+        }
+      displayName: 'Terraform Apply'
+
+    # -----------------------------------------------------
+    # Terraform Output
+    # -----------------------------------------------------
+    - powershell: |
+        Write-Host "========================================"
+        Write-Host "TERRAFORM OUTPUT"
+        Write-Host "========================================"
+
+        Set-Location "$(terraformDirectory)"
+
+        terraform output
+
+        $vmIp = terraform output -raw public_ip 2>$null
+
+        if ($LASTEXITCODE -eq 0 -and $vmIp) {
+            Write-Host "Terraform VM IP: $vmIp"
+
+            Write-Host "##vso[task.setvariable variable=TerraformPublicIP;isOutput=true]$vmIp"
+        }
+        else {
+            Write-Host "public_ip output was not found."
+            Write-Host "Continuing without public_ip pipeline variable."
+        }
       name: TerraformOutput
-      displayName: Terraform Output
+      displayName: 'Terraform Output'
+
+    # -----------------------------------------------------
+    # Publish Terraform Outputs
+    # -----------------------------------------------------
+    - powershell: |
+        Write-Host "========================================"
+        Write-Host "SAVE TERRAFORM OUTPUTS"
+        Write-Host "========================================"
+
+        Set-Location "$(terraformDirectory)"
+
+        terraform output -json > "$(Build.ArtifactStagingDirectory)/terraform-output.json"
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to generate Terraform output."
+            exit 1
+        }
+      displayName: 'Save Terraform Outputs'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Terraform Outputs'
       inputs:
-        command: output
-        workingDirectory: '$(terraformDirectory)'
+        targetPath: '$(Build.ArtifactStagingDirectory)/terraform-output.json'
+        artifact: 'terraform-output'
 
 
 # =========================================================
-# HELM
+# HELM DEPLOY
 # =========================================================
-- stage: Helm
+- stage: HelmDeploy
   displayName: Helm Deploy
-
   dependsOn: Terraform
-
   condition: succeeded()
-
-  variables:
-    VM_PUBLIC_IP: $[ stageDependencies.Terraform.TerraformJob.outputs['TerraformOutput.vm_public_ip'] ]
 
   jobs:
   - job: HelmJob
@@ -111,16 +213,88 @@ stages:
 
     steps:
 
-    - download: current
-      artifact: app
-      displayName: Download Application Artifact
+    # -----------------------------------------------------
+    # Download Terraform Output
+    # -----------------------------------------------------
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download Terraform Outputs'
+      inputs:
+        buildType: 'current'
+        artifactName: 'terraform-output'
+        targetPath: '$(Pipeline.Workspace)/terraform-output'
 
+    # -----------------------------------------------------
+    # Read Terraform Output
+    # -----------------------------------------------------
     - powershell: |
-        Write-Host "Terraform VM Public IP:"
-        Write-Host "$(VM_PUBLIC_IP)"
-      displayName: Read Terraform Output
+        Write-Host "========================================"
+        Write-Host "TERRAFORM OUTPUT"
+        Write-Host "========================================"
 
+        $outputFile = "$(Pipeline.Workspace)/terraform-output/terraform-output.json"
+
+        if (!(Test-Path $outputFile)) {
+            Write-Error "Terraform output file not found."
+            exit 1
+        }
+
+        Get-Content $outputFile
+
+        $terraformOutput = Get-Content $outputFile | ConvertFrom-Json
+
+        if ($terraformOutput.public_ip) {
+            $vmIp = $terraformOutput.public_ip.value
+
+            Write-Host "VM Public IP: $vmIp"
+            Write-Host "##vso[task.setvariable variable=TerraformPublicIP]$vmIp"
+        }
+      displayName: 'Read Terraform Outputs'
+
+    # -----------------------------------------------------
+    # Check Helm
+    # -----------------------------------------------------
     - powershell: |
-        Write-Host "Helm deployment stage started"
-        Write-Host "Target VM: $(VM_PUBLIC_IP)"
-      displayName: Helm Deploy
+        Write-Host "========================================"
+        Write-Host "HELM CHECK"
+        Write-Host "========================================"
+
+        helm version
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Helm is not installed on the agent."
+            exit 1
+        }
+      displayName: 'Check Helm'
+
+    # -----------------------------------------------------
+    # Helm Deploy
+    # -----------------------------------------------------
+    - powershell: |
+        Write-Host "========================================"
+        Write-Host "HELM DEPLOYMENT"
+        Write-Host "========================================"
+
+        Write-Host "Terraform completed successfully."
+        Write-Host "Starting Helm deployment..."
+
+        if ("$(TerraformPublicIP)" -ne "") {
+            Write-Host "Terraform VM IP: $(TerraformPublicIP)"
+        }
+
+        # Change this path if your Helm chart is in another directory.
+        $helmChart = "$(System.DefaultWorkingDirectory)/helm"
+
+        if (!(Test-Path $helmChart)) {
+            Write-Error "Helm chart directory not found: $helmChart"
+            exit 1
+        }
+
+        helm upgrade --install myapp $helmChart
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Helm deployment failed."
+            exit 1
+        }
+
+        Write-Host "Helm deployment completed successfully."
+      displayName: 'Helm Upgrade Install'
