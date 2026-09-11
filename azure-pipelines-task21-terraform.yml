@@ -84,12 +84,12 @@ stages:
         environmentServiceName: '$(serviceConnection)'
         commandOptions: '-auto-approve'
 
-     - task: TerraformCLI@1
-       name: TerraformOutput
-       displayName: Terraform Output
-       inputs:
-         command: output
-         workingDirectory: '$(terraformDirectory)'
+    - task: TerraformCLI@1
+      name: TerraformOutput
+      displayName: Terraform Output
+      inputs:
+        command: output
+        workingDirectory: '$(terraformDirectory)'
 
 
 # =========================================================
